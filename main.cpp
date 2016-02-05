@@ -7,17 +7,19 @@
 #include "math3d.h"
 #include "util.h"
 
-#define KSHI_AA_SAMPLES 4
+#define KSHI_AA_SAMPLES 16
 
 // GLFW callback functions.
 void glfw_log_err(int err, const char* desc);
 void glfw_win_resize(GLFWwindow* window, int w, int h);
+void glfw_mouse_pos(GLFWwindow* window, double m_x, double m_y);
+void glfw_mouse_button(GLFWwindow* window, int button, int action, int mods);
 // Bookkeeping.
 void update_fps_counter(GLFWwindow* window);
 
 // Basic UI values.
-int g_win_w = 640;
-int g_win_h = 480;
+int g_win_w = 1280;
+int g_win_h = 720;
 // Bookkeeping.
 double prev_seconds;
 int frame_count;
@@ -41,10 +43,15 @@ quat cam_quat_pitch(cam_quat_pitch_v.v[0], cam_quat_pitch_v.v[1], cam_quat_pitch
 v3 target_pos(0.0f, 0.0f, 0.0f);
 v3 y_up(0.0f, 1.0f, 0.0f);
 v3 c_move(0.0f, 0.0f, 0.0f);
+// Mouse stuff.
+double mouse_x = 0.0f;
+double mouse_y = 0.0f;
 // Perspective matrix values.
 float near = 0.1f;
 float far = 99.9f;
-float fov = 67.0f;
+// vertical fov = horizontal fov * aspect ratio.
+// 67.0 ~= 90 @ 4:3. 50.625 = 90 @ 16:9.
+float fov = 50.625f;
 float a_ratio = (float)g_win_w / (float)g_win_h;
 bool update_proj_matrix = false;
 
@@ -93,6 +100,8 @@ int main(int argc, char** args) {
 	}
 	glfwMakeContextCurrent(window);
 	glfwSetWindowSizeCallback(window, glfw_win_resize);
+	glfwSetCursorPosCallback(window, glfw_mouse_pos);
+	glfwSetMouseButtonCallback(window, glfw_mouse_button);
 
 	glewExperimental = GL_TRUE;
 	glewInit();
@@ -168,10 +177,67 @@ int main(int argc, char** args) {
 		-10.0f, -10.0f, -10.0f
 		}
 	};
+	// Not used with phong lighting.
 	GLfloat colors[] = {
 		1.0f, 0.0f, 0.0f,
 		0.0f, 1.0f, 0.0f,
 		0.0f, 0.0f, 1.0f
+	};
+	// Normals.
+	GLfloat normals[] = {
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f
+	};
+	GLfloat plane_normals[6][18] = {
+		{
+			-1.0f, 0.0f, 0.0f,
+			-1.0f, 0.0f, 0.0f,
+			-1.0f, 0.0f, 0.0f,
+			-1.0f, 0.0f, 0.0f,
+			-1.0f, 0.0f, 0.0f,
+			-1.0f, 0.0f, 0.0f
+		},
+		{
+			0.0f, 0.0f, 1.0f,
+			0.0f, 0.0f, 1.0f,
+			0.0f, 0.0f, 1.0f,
+			0.0f, 0.0f, 1.0f,
+			0.0f, 0.0f, 1.0f,
+			0.0f, 0.0f, 1.0f
+		},
+		{
+			0.0f, -1.0f, 0.0f,
+			0.0f, -1.0f, 0.0f,
+			0.0f, -1.0f, 0.0f,
+			0.0f, -1.0f, 0.0f,
+			0.0f, -1.0f, 0.0f,
+			0.0f, -1.0f, 0.0f
+		},
+		{
+			0.0f, 0.0f, -1.0f,
+			0.0f, 0.0f, -1.0f,
+			0.0f, 0.0f, -1.0f,
+			0.0f, 0.0f, -1.0f,
+			0.0f, 0.0f, -1.0f,
+			0.0f, 0.0f, -1.0f
+		},
+		{
+			1.0f, 0.0f, 0.0f,
+			1.0f, 0.0f, 0.0f,
+			1.0f, 0.0f, 0.0f,
+			1.0f, 0.0f, 0.0f,
+			1.0f, 0.0f, 0.0f,
+			1.0f, 0.0f, 0.0f
+		},
+		{
+			0.0f, 1.0f, 0.0f,
+			0.0f, 1.0f, 0.0f,
+			0.0f, 1.0f, 0.0f,
+			0.0f, 1.0f, 0.0f,
+			0.0f, 1.0f, 0.0f,
+			0.0f, 1.0f, 0.0f
+		}
 	};
 	GLfloat plane_colors[] = {
 		1.0f, 0.0f, 0.0f,
@@ -191,21 +257,21 @@ int main(int argc, char** args) {
 	glGenBuffers(1, &points2_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, points2_vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(points2), points2, GL_STATIC_DRAW);
-	GLuint colors_vbo = 0;
-	glGenBuffers(1, &colors_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, colors_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(colors), colors, GL_STATIC_DRAW);
+	GLuint normals_vbo = 0;
+	glGenBuffers(1, &normals_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(normals), normals, GL_STATIC_DRAW);
 	// Create plane VBOs.
 	GLuint plane_vbos[6] = {0, 0, 0, 0, 0, 0};
 	glGenBuffers(6, plane_vbos);
+	GLuint plane_normal_vbos[6] = {0, 0, 0, 0, 0, 0};
+	glGenBuffers(6, plane_normal_vbos);
 	for (int i=0; i<6; i++) {
 		glBindBuffer(GL_ARRAY_BUFFER, plane_vbos[i]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(planes[i]), planes[i], GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, plane_normal_vbos[i]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(plane_normals[i]), plane_normals[i], GL_STATIC_DRAW);
 	}
-	GLuint plane_colors_vbo = 0;
-	glGenBuffers(1, &plane_colors_vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, plane_colors_vbo);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(plane_colors), plane_colors, GL_STATIC_DRAW);
 
 	// Create the VAOs.
 	GLuint vao = 0;
@@ -213,7 +279,7 @@ int main(int argc, char** args) {
 	glBindVertexArray(vao);
 	glBindBuffer(GL_ARRAY_BUFFER, points_vbo);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-	glBindBuffer(GL_ARRAY_BUFFER, colors_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
@@ -222,7 +288,7 @@ int main(int argc, char** args) {
 	glBindVertexArray(vao2);
 	glBindBuffer(GL_ARRAY_BUFFER, points2_vbo);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-	glBindBuffer(GL_ARRAY_BUFFER, colors_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
@@ -233,7 +299,7 @@ int main(int argc, char** args) {
 		glBindVertexArray(plane_vaos[i]);
 		glBindBuffer(GL_ARRAY_BUFFER, plane_vbos[i]);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-		glBindBuffer(GL_ARRAY_BUFFER, plane_colors_vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, plane_normal_vbos[i]);
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
@@ -275,9 +341,25 @@ int main(int argc, char** args) {
 	glClearColor(0.5f, 0.5f, 0.6f, 1.0f);
 	int view_matrix_loc = glGetUniformLocation(shader_prog, "view");
 	int proj_matrix_loc = glGetUniformLocation(shader_prog, "proj");
+	int light_pos_loc = glGetUniformLocation(shader_prog, "light_pos_W");
+	int light_specular_loc = glGetUniformLocation(shader_prog, "Ls");
+	int light_diffuse_loc = glGetUniformLocation(shader_prog, "Ld");
+	int light_ambient_loc = glGetUniformLocation(shader_prog, "La");
+	int light2_pos_loc = glGetUniformLocation(shader_prog, "light2_pos_W");
+	int light2_specular_loc = glGetUniformLocation(shader_prog, "Ls2");
+	int light2_diffuse_loc = glGetUniformLocation(shader_prog, "Ld2");
+	int light2_ambient_loc = glGetUniformLocation(shader_prog, "La2");
 	glUseProgram(shader_prog);
 	glUniformMatrix4fv(view_matrix_loc, 1, GL_TRUE, c_view_matrix.m);
 	glUniformMatrix4fv(proj_matrix_loc, 1, GL_TRUE, persp_matrix.m);
+	glUniform3f(light_pos_loc, 7.5f, 7.5f, 7.5f);
+	glUniform3f(light_specular_loc, 1.0f, 1.0f, 1.0f);
+	glUniform3f(light_diffuse_loc, 0.0f, 0.2f, 0.0f);
+	glUniform3f(light_ambient_loc, 0.2f, 0.2f, 0.2f);
+	glUniform3f(light2_pos_loc, 4.5f, 7.5f, 7.5f);
+	glUniform3f(light2_specular_loc, 1.0f, 1.0f, 1.0f);
+	glUniform3f(light2_diffuse_loc, 0.3f, 0.0f, 0.0f);
+	glUniform3f(light2_ambient_loc, 0.2f, 0.2f, 0.2f);
 
 	bool cam_moved = true;
 	while (!glfwWindowShouldClose(window)) {
@@ -348,7 +430,7 @@ int main(int argc, char** args) {
 			cam_moved = true;
 		}
 		if (glfwGetKey(window, GLFW_KEY_U)) {
-			cam_roll -= cam_roll_speed * elapsed_sec;
+			cam_roll += cam_roll_speed * elapsed_sec;
 			cam_quat_roll = normalize(set(cam_roll, c_fwd));
 			cam_quat = cam_quat * cam_quat_roll;
 			cam_rot = quaternion_to_rotation(cam_quat);
@@ -358,7 +440,7 @@ int main(int argc, char** args) {
 			cam_moved = true;
 		}
 		if (glfwGetKey(window, GLFW_KEY_O)) {
-			cam_roll += cam_roll_speed * elapsed_sec;
+			cam_roll -= cam_roll_speed * elapsed_sec;
 			cam_quat_roll = normalize(set(cam_roll, c_fwd));
 			cam_quat = cam_quat * cam_quat_roll;
 			cam_rot = quaternion_to_rotation(cam_quat);
@@ -369,15 +451,15 @@ int main(int argc, char** args) {
 		}
 		// wasd for movement.
 		if (glfwGetKey(window, GLFW_KEY_A)) {
-			c_move.v[0] -= c_right.v[0] * cam_speed * elapsed_sec;
-			c_move.v[1] -= c_right.v[1] * cam_speed * elapsed_sec;
-			c_move.v[2] -= c_right.v[2] * cam_speed * elapsed_sec;
-			cam_moved = true;
-		}
-		if (glfwGetKey(window, GLFW_KEY_D)) {
 			c_move.v[0] += c_right.v[0] * cam_speed * elapsed_sec;
 			c_move.v[1] += c_right.v[1] * cam_speed * elapsed_sec;
 			c_move.v[2] += c_right.v[2] * cam_speed * elapsed_sec;
+			cam_moved = true;
+		}
+		if (glfwGetKey(window, GLFW_KEY_D)) {
+			c_move.v[0] -= c_right.v[0] * cam_speed * elapsed_sec;
+			c_move.v[1] -= c_right.v[1] * cam_speed * elapsed_sec;
+			c_move.v[2] -= c_right.v[2] * cam_speed * elapsed_sec;
 			cam_moved = true;
 		}
 		if (glfwGetKey(window, GLFW_KEY_W)) {
@@ -390,6 +472,18 @@ int main(int argc, char** args) {
 			c_move.v[0] += c_fwd.v[0] * cam_speed * elapsed_sec;
 			c_move.v[1] += c_fwd.v[1] * cam_speed * elapsed_sec;
 			c_move.v[2] += c_fwd.v[2] * cam_speed * elapsed_sec;
+			cam_moved = true;
+		}
+		if (glfwGetKey(window, GLFW_KEY_Q)) {
+			c_move.v[0] += c_up.v[0] * cam_speed * elapsed_sec;
+			c_move.v[1] += c_up.v[1] * cam_speed * elapsed_sec;
+			c_move.v[2] += c_up.v[2] * cam_speed * elapsed_sec;
+			cam_moved = true;
+		}
+		if (glfwGetKey(window, GLFW_KEY_E)) {
+			c_move.v[0] -= c_up.v[0] * cam_speed * elapsed_sec;
+			c_move.v[1] -= c_up.v[1] * cam_speed * elapsed_sec;
+			c_move.v[2] -= c_up.v[2] * cam_speed * elapsed_sec;
 			cam_moved = true;
 		}
 
@@ -447,6 +541,15 @@ void glfw_win_resize(GLFWwindow* window, int w, int h) {
 
 	// We should update the projection matrix next game loop step.
 	update_proj_matrix = true;
+}
+
+void glfw_mouse_pos(GLFWwindow* window, double m_x, double m_y) {
+	mouse_x = m_x;
+	mouse_y = m_y;
+}
+
+void glfw_mouse_button(GLFWwindow* window, int button, int action, int mods) {
+	printf("MX: %.2f\nMY: %.2f\n", mouse_x, mouse_y);
 }
 
 /*
