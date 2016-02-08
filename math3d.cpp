@@ -429,6 +429,13 @@ m4 id4() {
 			  0, 0, 0, 1);
 }
 
+m4 transpose(m4 orig) {
+	return m4(orig.m[0], orig.m[4], orig.m[8],  orig.m[12],
+			  orig.m[1], orig.m[5], orig.m[9],  orig.m[13],
+			  orig.m[2], orig.m[6], orig.m[10], orig.m[14],
+			  orig.m[3], orig.m[7], orig.m[11], orig.m[15]);
+}
+
 m4 rotate_x(float degrees) {
 	float rads = ang_to_rad(degrees);
 	return rotate_x_rads(rads);

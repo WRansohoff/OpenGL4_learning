@@ -4,8 +4,11 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include "math2d.h"
 #include "math3d.h"
 #include "util.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #define KSHI_AA_SAMPLES 16
 
@@ -23,7 +26,10 @@ int g_win_h = 720;
 // Bookkeeping.
 double prev_seconds;
 int frame_count;
+int ogl_err = -1;
+bool debug = false;
 // Camera stuff.
+int ubo_cam = 0;
 float cam_speed = 2.0f;
 float cam_yaw_speed = 100.0f;
 float cam_pitch_speed = 100.0f;
@@ -43,6 +49,18 @@ quat cam_quat_pitch(cam_quat_pitch_v.v[0], cam_quat_pitch_v.v[1], cam_quat_pitch
 v3 target_pos(0.0f, 0.0f, 0.0f);
 v3 y_up(0.0f, 1.0f, 0.0f);
 v3 c_move(0.0f, 0.0f, 0.0f);
+// Lighting stuff.
+int ubo_lights = 1;
+float light_speed = 20.0f;
+float light_z = 7.5f;
+float light2_x = 4.5f;
+int light_dir = -1;
+int light2_dir = -1;
+// Texture stuff.
+int tex_x, tex_y, tex_n;
+int tex_channels = 4;
+unsigned char* tex_data;
+const char* tex_fn = "textures/png/test_texture.png";
 // Mouse stuff.
 double mouse_x = 0.0f;
 double mouse_y = 0.0f;
@@ -75,6 +93,10 @@ int main(int argc, char** args) {
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	// Anti-aliasing is nice.
 	glfwWindowHint(GLFW_SAMPLES, KSHI_AA_SAMPLES);
+	// Allow debugging stuff.
+	if (debug) {
+		glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+	}
 
 	// Until I make an options menu or something, put the window on
 	// a monitor if available, to my laptop screen if not. (Uncomment to use fullscreen)
@@ -105,6 +127,11 @@ int main(int argc, char** args) {
 
 	glewExperimental = GL_TRUE;
 	glewInit();
+
+	// Setup extensions, if possible.
+	if (debug) {
+		gl_ext_check(&ogl_err);
+	}
 
 	// Get compatibility information.
 	const GLubyte* renderer = glGetString(GL_RENDERER);
@@ -247,6 +274,61 @@ int main(int argc, char** args) {
 		0.5f, 0.5f, 0.0f,
 		0.5f, 0.0f, 0.5f
 	};
+	GLfloat tri_texcoords[] = {
+		 0.0f,  0.5f,
+		 0.5f, -0.5f,
+		-0.5f, -0.5f
+	};
+	GLfloat plane_texcoords[6][12] = {
+		{
+			0.0f, 1.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f,
+			1.0f, 0.0f
+		},
+		{
+			0.0f, 1.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f,
+			1.0f, 0.0f
+		},
+		{
+			0.0f, 1.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f,
+			1.0f, 0.0f
+		},
+		{
+			0.0f, 1.0f,
+			0.0f, 0.0f,
+			1.0f, 0.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 1.0f
+		},
+		{
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f,
+			0.0f, 0.0f,
+			1.0f, 1.0f
+		},
+		{
+			0.0f, 1.0f,
+			1.0f, 1.0f,
+			1.0f, 0.0f,
+			0.0f, 0.0f,
+			0.0f, 1.0f,
+			1.0f, 0.0f
+		}
+	};
 
 	// Create the VBOs.
 	GLuint points_vbo = 0;
@@ -261,16 +343,24 @@ int main(int argc, char** args) {
 	glGenBuffers(1, &normals_vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(normals), normals, GL_STATIC_DRAW);
+	GLuint tri_tex_vbo = 0;
+	glGenBuffers(1, &tri_tex_vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, tri_tex_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(tri_texcoords), tri_texcoords, GL_STATIC_DRAW);
 	// Create plane VBOs.
 	GLuint plane_vbos[6] = {0, 0, 0, 0, 0, 0};
 	glGenBuffers(6, plane_vbos);
 	GLuint plane_normal_vbos[6] = {0, 0, 0, 0, 0, 0};
 	glGenBuffers(6, plane_normal_vbos);
+	GLuint plane_tex_vbos[6] = {0, 0, 0, 0, 0, 0};
+	glGenBuffers(6, plane_tex_vbos);
 	for (int i=0; i<6; i++) {
 		glBindBuffer(GL_ARRAY_BUFFER, plane_vbos[i]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(planes[i]), planes[i], GL_STATIC_DRAW);
 		glBindBuffer(GL_ARRAY_BUFFER, plane_normal_vbos[i]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(plane_normals[i]), plane_normals[i], GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, plane_tex_vbos[i]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(plane_texcoords[i]), plane_texcoords[i], GL_STATIC_DRAW);
 	}
 
 	// Create the VAOs.
@@ -281,8 +371,11 @@ int main(int argc, char** args) {
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+	glBindBuffer(GL_ARRAY_BUFFER, tri_tex_vbo);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, NULL);
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
 	GLuint vao2 = 0;
 	glGenVertexArrays(1, &vao2);
 	glBindVertexArray(vao2);
@@ -290,8 +383,11 @@ int main(int argc, char** args) {
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 	glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
 	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+	glBindBuffer(GL_ARRAY_BUFFER, tri_tex_vbo);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, NULL);
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
+	glEnableVertexAttribArray(2);
 	// Create plane VAOs.
 	GLuint plane_vaos[6] = {0, 0, 0, 0, 0, 0};
 	glGenVertexArrays(6, plane_vaos);
@@ -301,9 +397,47 @@ int main(int argc, char** args) {
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 		glBindBuffer(GL_ARRAY_BUFFER, plane_normal_vbos[i]);
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+		glBindBuffer(GL_ARRAY_BUFFER, plane_tex_vbos[i]);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, NULL);
 		glEnableVertexAttribArray(0);
 		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
 	}
+
+	// Load and bind textures.
+	// Load texture data.
+	tex_data = stbi_load(tex_fn, &tex_x, &tex_y, &tex_n, tex_channels);
+	if (!tex_data) {
+		gl_log_error("ERROR: Could not load image: %s\n", tex_fn);
+	}
+	if ((tex_x & (tex_x-1)) != 0 || (tex_y & (tex_y-1) != 0)) {
+		gl_log("WARN:  texture %s has x or y % 2 != 0", tex_fn);
+	}
+	// Flip the texture vertically.
+	flip_tex_V(tex_data, tex_x, tex_y, tex_n);
+
+	// Bind texture data.
+	int mipmap_LOD = 0;
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D,
+				 mipmap_LOD, GL_SRGB_ALPHA, tex_x, tex_y,
+				 0, GL_RGBA, GL_UNSIGNED_BYTE,
+				 tex_data);
+	// Some basic texture parameters.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	// Generate mipmaps.
+	glGenerateMipmap(GL_TEXTURE_2D);
+	// Enable max supported level of anisotropic filtering.
+	GLfloat max_anisotropic = 0.0f;
+	glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &max_anisotropic);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, max_anisotropic);
+	//printf("Using %.2f anisotropic samples\n", max_anisotropic);
 
 	// Compile the shaders.
 	GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -339,8 +473,12 @@ int main(int argc, char** args) {
 	float last_pos = 0.5f;
 	// Draw loop.
 	glClearColor(0.5f, 0.5f, 0.6f, 1.0f);
+
+	// Non-UBO uniform setting.
+	/*
 	int view_matrix_loc = glGetUniformLocation(shader_prog, "view");
 	int proj_matrix_loc = glGetUniformLocation(shader_prog, "proj");
+	// Phong light values.
 	int light_pos_loc = glGetUniformLocation(shader_prog, "light_pos_W");
 	int light_specular_loc = glGetUniformLocation(shader_prog, "Ls");
 	int light_diffuse_loc = glGetUniformLocation(shader_prog, "Ld");
@@ -352,14 +490,54 @@ int main(int argc, char** args) {
 	glUseProgram(shader_prog);
 	glUniformMatrix4fv(view_matrix_loc, 1, GL_TRUE, c_view_matrix.m);
 	glUniformMatrix4fv(proj_matrix_loc, 1, GL_TRUE, persp_matrix.m);
-	glUniform3f(light_pos_loc, 7.5f, 7.5f, 7.5f);
+	glUniform3f(light_pos_loc, 7.5f, 7.5f, light_z);
 	glUniform3f(light_specular_loc, 1.0f, 1.0f, 1.0f);
-	glUniform3f(light_diffuse_loc, 0.0f, 0.2f, 0.0f);
+	glUniform3f(light_diffuse_loc, 0.5f, 0.7f, 0.5f);
 	glUniform3f(light_ambient_loc, 0.2f, 0.2f, 0.2f);
-	glUniform3f(light2_pos_loc, 4.5f, 7.5f, 7.5f);
+	glUniform3f(light2_pos_loc, light2_x, 7.5f, 6.5f);
 	glUniform3f(light2_specular_loc, 1.0f, 1.0f, 1.0f);
-	glUniform3f(light2_diffuse_loc, 0.3f, 0.0f, 0.0f);
+	glUniform3f(light2_diffuse_loc, 0.5f, 0.5f, 0.7f);
 	glUniform3f(light2_ambient_loc, 0.2f, 0.2f, 0.2f);
+	*/
+
+	glUseProgram(shader_prog);
+
+	// Setup uniform buffer objects.
+	// One for camera values, one for lighting values.
+	GLuint cam_block_buffer;
+	glGenBuffers(1, &cam_block_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, cam_block_buffer);
+	// Store view and projection matrices; 2 * 16 floats.
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 32, NULL, GL_DYNAMIC_DRAW);
+	GLuint cam_ubo_index = glGetUniformBlockIndex(shader_prog, "cam_ubo");
+	glUniformBlockBinding(shader_prog, cam_ubo_index, ubo_cam);
+	glBindBufferBase(GL_UNIFORM_BUFFER, ubo_cam, cam_block_buffer);
+	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 16, transpose(c_view_matrix).m);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 16, sizeof(float) * 16, transpose(persp_matrix).m);
+
+	GLuint lights_block_buffer;
+	glGenBuffers(1, &lights_block_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, lights_block_buffer);
+	// Store position, specular, diffuse, and ambient values for 2 lights.
+	// We'll use v4's, so that's 16 * 2 floats.
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(float) * 32, NULL, GL_DYNAMIC_DRAW);
+	GLuint lights_ubo_index = glGetUniformBlockIndex(shader_prog, "lights_ubo");
+	glUniformBlockBinding(shader_prog, lights_ubo_index, ubo_lights);
+	glBindBufferBase(GL_UNIFORM_BUFFER, ubo_lights, lights_block_buffer);
+	float light_pos[] = { 7.5f, 7.5f, light_z, 1.0f };
+	float light2_pos[] = { light2_x, 7.5f, 6.5f, 1.0f };
+	glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4, light_pos);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 4, sizeof(float) * 4, light2_pos);
+	float light_spec[] = { 1.0f, 1.0f, 1.0f, 0.0f };
+	float light_diffuse[] = { 0.5f, 0.7f, 0.5f, 0.0f };
+	float light_ambient[] = { 0.2f, 0.2f, 0.2f, 0.0f };
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 8, sizeof(float) * 4, light_spec);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 12, sizeof(float) * 4, light_diffuse);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 16, sizeof(float) * 4, light_ambient);
+	float light2_diffuse[] = { 0.5f, 0.5f, 0.7f, 0.0f };
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 20, sizeof(float) * 4, light_spec);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 24, sizeof(float) * 4, light2_diffuse);
+	glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 28, sizeof(float) * 4, light_ambient);
 
 	bool cam_moved = true;
 	while (!glfwWindowShouldClose(window)) {
@@ -370,6 +548,23 @@ int main(int argc, char** args) {
 		double elapsed_sec = cur_sec - prev_sec;
 		prev_sec = cur_sec;
 
+		// Update light positions.
+		light_z += light_dir * light_speed * elapsed_sec;
+		light2_x += light2_dir * light_speed * elapsed_sec;
+		if (light_z >= 8.0f) { light_dir = -1; }
+		else if (light_z <= -8.0f) { light_dir = 1; }
+		if (light2_x >= 8.0f) { light2_dir = -1; }
+		else if (light2_x <= -8.0f) { light2_dir = 1; }
+		// Update shaders.
+		glBindBuffer(GL_UNIFORM_BUFFER, lights_block_buffer);
+		glBindBufferBase(GL_UNIFORM_BUFFER, ubo_lights, lights_block_buffer);
+		light_pos[2] = light_z;
+		light2_pos[0] = light2_x;
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 4, light_pos);
+		glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 4, sizeof(float) * 4, light2_pos);
+		//glUniform3f(light_pos_loc, 7.5f, 7.5f, light_z);
+		//glUniform3f(light2_pos_loc, light2_x, 7.5f, 6.5f);
+
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glViewport(0, 0, g_win_w, g_win_h);
 		update_fps_counter(window);
@@ -377,7 +572,10 @@ int main(int argc, char** args) {
 		// Only update the projection matrix if necessary.
 		if (update_proj_matrix) {
 			persp_matrix = perspective(near, far, fov, a_ratio);
-			glUniformMatrix4fv(proj_matrix_loc, 1, GL_TRUE, persp_matrix.m);
+			glBindBuffer(GL_UNIFORM_BUFFER, cam_block_buffer);
+			glBindBufferBase(GL_UNIFORM_BUFFER, ubo_cam, cam_block_buffer);
+			glBufferSubData(GL_UNIFORM_BUFFER, sizeof(float) * 16, sizeof(float) * 16, transpose(persp_matrix).m);
+			//glUniformMatrix4fv(proj_matrix_loc, 1, GL_TRUE, persp_matrix.m);
 			update_proj_matrix = false;
 		}
 
@@ -501,7 +699,10 @@ int main(int argc, char** args) {
 			printf("Rotation matrix:\n%s\n", print(quaternion_to_rotation(cam_quat)).c_str());
 
 			// Don't forget to tell the shaders.
-			glUniformMatrix4fv(view_matrix_loc, 1, GL_TRUE, c_view_matrix.m);
+			glBindBuffer(GL_UNIFORM_BUFFER, cam_block_buffer);
+			glBindBufferBase(GL_UNIFORM_BUFFER, ubo_cam, cam_block_buffer);
+			glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(float) * 16, transpose(c_view_matrix).m);
+			//glUniformMatrix4fv(view_matrix_loc, 1, GL_TRUE, c_view_matrix.m);
 
 			cam_moved = false;
 		}

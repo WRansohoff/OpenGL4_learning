@@ -18,5 +18,10 @@ int restart_gl_log();
 int gl_log(const char* msg, ...);
 int gl_log_error(const char* msg, ...);
 void gl_info();
+void gl_ext_check(int *err_param);
+void gl_error_debug(unsigned int source, unsigned int type,
+					unsigned int id, unsigned int severity,
+					int length, const char* message,
+					void* user_param);
 
 #endif

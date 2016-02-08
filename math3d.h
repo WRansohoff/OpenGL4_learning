@@ -124,6 +124,7 @@ v3 cross(v3& vec1, v3& vec2);
 v3 lerp(v3& vec1, v3& vec2, float prog);
 // 4x4 Matrix functions.
 m4 id4();
+m4 transpose(m4 orig);
 m4 rotate_x(float degrees);
 m4 rotate_x_rads(float rads);
 m4 rotate_y(float degrees);
