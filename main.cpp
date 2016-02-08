@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "math2d.h"
 #include "math3d.h"
 #include "util.h"
@@ -61,6 +62,9 @@ int tex_x, tex_y, tex_n;
 int tex_channels = 4;
 unsigned char* tex_data;
 const char* tex_fn = "textures/png/test_texture.png";
+// Mesh stuff.
+bool mesh_debug = true;
+const char* mesh_fn = "meshes/twisty_box.dae";
 // Mouse stuff.
 double mouse_x = 0.0f;
 double mouse_y = 0.0f;
@@ -404,6 +408,11 @@ int main(int argc, char** args) {
 		glEnableVertexAttribArray(2);
 	}
 
+	// Load the mesh.
+	GLuint mesh_vao = 0;
+	int num_vertices = 0;
+	loadMesh(mesh_fn, &mesh_vao, &num_vertices, mesh_debug);
+
 	// Load and bind textures.
 	// Load texture data.
 	tex_data = stbi_load(tex_fn, &tex_x, &tex_y, &tex_n, tex_channels);
@@ -716,6 +725,8 @@ int main(int argc, char** args) {
 			glBindVertexArray(plane_vaos[i]);
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 		}
+		glBindVertexArray(mesh_vao);
+		glDrawArrays(GL_TRIANGLES, 0, num_vertices);
 		glfwSwapBuffers(window);
 	}
 

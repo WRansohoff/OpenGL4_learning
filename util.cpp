@@ -43,6 +43,127 @@ int loadShader(const char* filename, GLuint shader) {
 	return 0;
 }
 
+int loadMesh(const char* filename, GLuint* vao, int* num_vertices) {
+	return loadMesh(filename, vao, num_vertices, false);
+}
+
+int loadMesh(const char* filename, GLuint* vao, int* num_vertices, bool mesh_debug) {
+	const aiScene* scene = aiImportFile(filename, aiProcess_Triangulate);
+
+	if (!scene) {
+		gl_log_error("ERROR: Cannot read mesh %s\n", filename);
+		return 1;
+	}
+
+	if (mesh_debug) {
+		// Log some information about the mesh.
+		gl_log("Loaded mesh %s\n", filename);
+		gl_log("  %i animations\n", scene->mNumAnimations);
+		gl_log("  %i cameras\n",    scene->mNumCameras);
+		gl_log("  %i lights\n",     scene->mNumLights);
+		gl_log("  %i materials\n",  scene->mNumMaterials);
+		gl_log("  %i meshes\n",     scene->mNumMeshes);
+		gl_log("  %i textures\n",   scene->mNumTextures);
+		gl_log("----------------------\n");
+	}
+
+	// For now, just get the first mesh.
+	const aiMesh* mesh = scene->mMeshes[0];
+
+	if (mesh_debug) {
+		gl_log("  Mesh 0:\n");
+		gl_log("    %i  vertices\n", mesh->mNumVertices);
+	}
+
+	// Populate # of vertices in the mesh.
+	*num_vertices = mesh->mNumVertices;
+
+	// Create the VAO.
+	glGenVertexArrays(1, vao);
+	glBindVertexArray(*vao);
+	
+	GLfloat* points = NULL;
+	GLfloat* normals = NULL;
+	GLfloat* texcoords = NULL;
+
+	// Fill up position vectors.
+	if (mesh->HasPositions()) {
+		points = new GLfloat [*num_vertices * 3];
+		for (int i=0; i<*num_vertices; i++) {
+			const aiVector3D* vec_pos = &(mesh->mVertices[i]);
+			points[i*3] = (GLfloat) vec_pos->x;
+			points[(i*3)+1] = (GLfloat) vec_pos->y;
+			points[(i*3)+2] = (GLfloat) vec_pos->z;
+		}
+	}
+
+	// Mesh's normal vectors.
+	if (mesh->HasNormals()) {
+		normals = new GLfloat [*num_vertices * 3];
+		for (int i=0; i<*num_vertices; i++) {
+			const aiVector3D* vec_norm = &(mesh->mNormals[i]);
+			normals[i*3] = (GLfloat) vec_norm->x;
+			normals[(i*3)+1] = (GLfloat) vec_norm->y;
+			normals[(i*3)+2] = (GLfloat) vec_norm->z;
+		}
+	}
+
+	// Texture coordinates, if applicable.
+	if (mesh->HasTextureCoords(0)) {
+		texcoords = new GLfloat [*num_vertices * 2];
+		for (int i=0; i<*num_vertices; i++) {
+			const aiVector3D* vec_tex = &(mesh->mTextureCoords[0][i]);
+			texcoords[i*2] = (GLfloat) vec_tex->x;
+			texcoords[(i*2)+1] = (GLfloat) vec_tex->y;
+		}
+	}
+
+	// Copy mesh data into VBOs.
+	if (mesh->HasPositions()) {
+		GLuint points_vbo;
+		glGenBuffers(1, &points_vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, points_vbo);
+		glBufferData(GL_ARRAY_BUFFER, (3 * *num_vertices * sizeof(GLfloat)),
+					 points, GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+		glEnableVertexAttribArray(0);
+
+		delete points;
+	}
+	else { gl_log("Warning: Loaded mesh %s with no position vertices.\n", filename); }
+
+	if (mesh->HasNormals()) {
+		GLuint normals_vbo;
+		glGenBuffers(1, &normals_vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, normals_vbo);
+		glBufferData(GL_ARRAY_BUFFER, (3 * *num_vertices * sizeof(GLfloat)),
+					 normals, GL_STATIC_DRAW);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+		glEnableVertexAttribArray(1);
+
+		delete normals;
+	}
+	else { gl_log("Warning: Loaded mesh %s with no normals.\n", filename); }
+
+	if (mesh->HasTextureCoords(0)) {
+		GLuint texcoords_vbo;
+		glGenBuffers(1, &texcoords_vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, texcoords_vbo);
+		glBufferData(GL_ARRAY_BUFFER, (2 * *num_vertices * sizeof(GLfloat)),
+					 texcoords, GL_STATIC_DRAW);
+		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+		glEnableVertexAttribArray(2);
+
+		delete texcoords;
+	}
+	else { gl_log("Warning: Loaded mesh %s with no texture coordinates.\n", filename); }
+
+	// Free assimp buffer.
+	aiReleaseImport(scene);
+
+	return 0;
+}
+
 /*
  * OpenGL logging functions.
  */
